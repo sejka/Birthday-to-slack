@@ -1,7 +1,6 @@
 using Ical.Net;
 using Ical.Net.CalendarComponents;
 using Microsoft.Azure.WebJobs;
-using Microsoft.Azure.WebJobs.Host;
 using Microsoft.Extensions.Configuration;
 using System;
 using System.Linq;
@@ -13,7 +12,7 @@ namespace BirthdayToSlack
 {
     public static class BirthdayToSlackFunction
     {
-        private static IConfigurationRoot config = new ConfigurationBuilder()
+        private static readonly IConfigurationRoot config = new ConfigurationBuilder()
                 .SetBasePath(Environment.CurrentDirectory)
                 .AddJsonFile("local.settings.json", optional: true, reloadOnChange: true)
                 .AddEnvironmentVariables()
@@ -26,10 +25,8 @@ namespace BirthdayToSlack
         private static readonly HttpClient _httpClient = new HttpClient();
 
         [FunctionName("BirthdayToSlackFunction")]
-        public static async Task Run([TimerTrigger("0 0 9 * * *")]TimerInfo myTimer, TraceWriter log)
+        public static async Task Run([TimerTrigger("0 0 9 * * *")]TimerInfo myTimer)
         {
-            log.Info($"C# Timer trigger function executed at: {DateTime.Now}");
-
             var icalStream = await _httpClient.GetStreamAsync(calendarFileUrl);
             Calendar calendar = Calendar.Load(icalStream);
 
@@ -40,29 +37,25 @@ namespace BirthdayToSlack
             foreach (var birthday in todaysBirthday)
             {
                 PostBirthdayToSlack(birthday);
-                log.Info($"Posted {birthday.Summary}");
             }
         }
 
         private static async void PostBirthdayToSlack(CalendarEvent birthday)
         {
-            using (var client = new HttpClient())
-            {
-                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-                client.DefaultRequestHeaders.Add("User-Agent", "AzureFunctions");
+            _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            _httpClient.DefaultRequestHeaders.Add("User-Agent", "AzureFunctions");
 
-                //"Joe, Doe - Birthday"
-                var surnameAndName = birthday.Summary.Split(' ').Take(2);
+            //"Tommy Lee Jones - Birthday"
+            var names = birthday
+                .Summary
+                .Split('-')[0]
+                .Trim();
 
-                //["Joe,", "Doe"]
+            //"Tommy Lee Jones"
 
-                var firstName = surnameAndName.ElementAt(1);
-                var lastName = surnameAndName.First().Replace(",", "");
+            StringContent requestContent = new StringContent($"{{\"text\": \"It's {names} birthday!\", \"username\": \"Birthday Bot\", \"icon_emoji\": \":birthday:\"}}");
 
-                StringContent requestContent = new StringContent($"{{\"text\": \"It's {firstName} {lastName} birthday!\", \"username\": \"Birthday Bot\", \"icon_emoji\": \":birthday:\"}}");
-
-                HttpResponseMessage response = await client.PostAsync(slackWebhookUrl, requestContent);
-            }
+            HttpResponseMessage response = await _httpClient.PostAsync(slackWebhookUrl, requestContent);
         }
     }
 }
